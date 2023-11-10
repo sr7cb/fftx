@@ -28,7 +28,7 @@ BUILD_EXAMPLES=true
 ##  (if nothing is specified).  NOTE: This mechanism is used to facilitate building with
 ##  spack.
 
-BUILD_FOR_CPU=true
+BUILD_FOR_CPU=false
 BUILD_FOR_CUDA=false
 BUILD_FOR_HIP=false
 BUILD_FOR_SYCL=false

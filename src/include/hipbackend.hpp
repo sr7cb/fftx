@@ -382,7 +382,7 @@ inline float Executor::initAndLaunch(std::vector<void*>& args) {
                           kernel_params[i*6+3], kernel_params[i*6+4], kernel_params[i*6+5], // block dim
                           0, nullptr, nullptr, // shared mem and stream
                           (void**)&config));
-    hipDeviceSynchronize();
+    // hipDeviceSynchronize();
     }
     DEVICE_SAFE_CALL(hipEventRecord(stop,0));
     DEVICE_SAFE_CALL(hipEventSynchronize(stop));

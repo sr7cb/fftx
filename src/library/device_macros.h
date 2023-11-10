@@ -4,7 +4,7 @@
 #if defined(FFTX_HIP)
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
-#include <hipfft.h>
+#include <hipfft/hipfft.h>
 #include <rocfft/rocfft.h>
 
 #define DEVICE_SUCCESS hipSuccess
