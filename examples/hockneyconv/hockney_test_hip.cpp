@@ -3,12 +3,11 @@
 #include <ctime>
 #include <vector>
 #include <complex>
-#include <cuda_runtime.h>
-#include <cufft.h>
-#undef __CUDACC__
+#include <hip/hip_runtime.h>
+#include <rocfft/rocfft.h>
+#include <hipfft/hipfft.h>
 #include "interface.hpp"
 #include "hockneyconvObj.hpp"
-// #include "spiral_generated_hockney.cu"
 
 static void checkOutputBuffers( double *spiral_Y, double *devfft_Y, long arrsz )
 {
@@ -35,6 +34,7 @@ template <typename T>
 void print(T input) {
     for(int i = 0; i < 10; i++)
         std::cout << input[i] << std::endl;
+    std::cout << std::endl;
 }
 
 __global__ void complexMultiplyKernel(double* a, double* b, double* result, int size) {
@@ -66,7 +66,6 @@ void buildInput(std::vector<std::complex<double>>& input) {
 }
 
 
-
 __global__ void zeroPadKernel(double* d_output, const double* d_input, 
                               int x_old, int y_old, int z_old, 
                               int x, int y, int z) {
@@ -92,10 +91,10 @@ __global__ void zeroPadKernel(double* d_output, const double* d_input,
 void zeroPad(double* d_output, const std::vector<double> input, 
              int x_old, int y_old, int z_old, int x, int y, int z) {
     // Step 1: Initialize the larger cube with zeros on the GPU
-    cudaMemset(d_output, 0, x * y * z * sizeof(double));
+    hipMemset(d_output, 0, x * y * z * sizeof(double));
     double *d_input;
-    cudaMalloc(&d_input, x_old*y_old*z_old*sizeof(double));
-    cudaMemcpy(d_input, input.data(), x_old*y_old*z_old*sizeof(double), cudaMemcpyHostToDevice);
+    hipMalloc(&d_input, x_old*y_old*z_old*sizeof(double));
+    hipMemcpy(d_input, input.data(), x_old*y_old*z_old*sizeof(double), hipMemcpyHostToDevice);
 
     // Step 2: Define block dimensions for 256 threads per block
     dim3 blockDim(8, 8, 4);
@@ -106,8 +105,8 @@ void zeroPad(double* d_output, const std::vector<double> input,
                  (z_old + blockDim.z - 1) / blockDim.z);
 
     // Step 4: Launch the kernel
-    zeroPadKernel<<<gridDim, blockDim>>>(d_output, d_input, x_old, y_old, z_old, x, y, z);
-    cudaFree(d_input);
+    hipLaunchKernelGGL(zeroPadKernel, gridDim, blockDim, 0, 0, d_output, d_input, x_old, y_old, z_old, x, y, z);
+    hipFree(d_input);
 }
 
 __global__ void extractKernel(double *d_input, double *d_output, 
@@ -137,7 +136,7 @@ void extract(std::vector<double>& output, double *d_input,
 
     // Allocate memory for the smaller cube on the device
     double *d_output;
-    cudaMalloc(&d_output, x_small * y_small * z_small * sizeof(double));
+    hipMalloc(&d_output, x_small * y_small * z_small * sizeof(double));
 
     // Define block dimensions for 256 threads per block
     dim3 blockDim(8, 8, 4);
@@ -148,13 +147,14 @@ void extract(std::vector<double>& output, double *d_input,
                  (z_small + blockDim.z - 1) / blockDim.z);
 
     // Launch the kernel with the updated configuration
-    extractKernel<<<gridDim, blockDim>>>(d_input, d_output, x, y, z, x_small, y_small, z_small);
+    hipLaunchKernelGGL(extractKernel, gridDim, blockDim, 0, 0, d_input, d_output, x, y, z, x_small, y_small, z_small);
 
     // Copy the extracted smaller cube back to the host
-    cudaMemcpy(output.data(), d_output, x_small * y_small * z_small * sizeof(double), cudaMemcpyDeviceToHost);
+    hipMemcpy(output.data(), d_output, x_small * y_small * z_small * sizeof(double), 
+    hipMemcpyDeviceToHost);
 
     // Free device memory
-    cudaFree(d_output);
+    hipFree(d_output);
 }
 
 int main() {
@@ -181,98 +181,113 @@ int main() {
     double* d_temp;
     double* d_out2;
 
-    cudaMalloc(&d_extended_input, Nx * Ny * Nz * sizeof(double));
-    cudaMalloc(&d_out, 2* Nx * Ny * ((Nz/2)+1) * sizeof(double));
-    cudaMalloc(&d_temp, 2* Nx * Ny * ((Nz/2)+1) * sizeof(double));
-    cudaMalloc(&d_out2, Nx*Ny*Nz * sizeof(double));
+    hipMalloc(&d_extended_input, Nx * Ny * Nz * sizeof(double));
+    hipMalloc(&d_out, 2* Nx * Ny * ((Nz/2)+1) * sizeof(double));
+    hipMalloc(&d_temp, 2* Nx * Ny * ((Nz/2)+1) * sizeof(double));
+    hipMalloc(&d_out2, Nx*Ny*Nz * sizeof(double));
 
-    cudaMemset(d_extended_input, 0, Nx * Ny * Nz * sizeof(double));
+    hipMemset(d_extended_input, 0, Nx * Ny * Nz * sizeof(double));
     double *d_input;
-    cudaMalloc(&d_input, nx * ny * nz*sizeof(double));
+    hipMalloc(&d_input, nx*ny*nz*sizeof(double));
 
     double *d_output;
-    cudaMalloc(&d_output, mx* my * mz * sizeof(double));
+    hipMalloc(&d_output, mx*my*mz*sizeof(double));
 
     dim3 blockDim(8, 8, 4);
 
-    // Step 3: Calculate grid dimensions
     dim3 gridDim((nx + blockDim.x - 1) / blockDim.x,
                  (ny + blockDim.y - 1) / blockDim.y,
                  (nz + blockDim.z - 1) / blockDim.z);
-    
+
     dim3 gridDimout((mx + blockDim.x - 1) / blockDim.x,
                  (my + blockDim.y - 1) / blockDim.y,
                  (mz + blockDim.z - 1) / blockDim.z);
 
     buildInput(input);
     buildInput(input2);
-    
-    cudaMemcpy(d_input, input.data(), nx * ny * nz*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_temp, input2.data(), 2 * Nx * Ny * ((Nz/2)+1) * sizeof(double), cudaMemcpyHostToDevice);
-   
-    cufftHandle plan;
-    cufftPlan3d(&plan, Nx, Ny, Nz, CUFFT_D2Z);
-    cufftHandle plan2;
-    cufftPlan3d(&plan2, Nx, Ny, Nz, CUFFT_Z2D);
+
+    hipMemcpy(d_input, input.data(), nx*ny*nz*sizeof(double), hipMemcpyHostToDevice);
+    hipMemcpy(d_temp, input2.data(), 2 * Nx * Ny * ((Nz/2)+1) * sizeof(double), hipMemcpyHostToDevice);
+ 
+    rocfft_plan forward_plan;
+    size_t work_size = 0;
+    size_t lengths[3] = {static_cast<size_t>(Nz), static_cast<size_t>(Ny), static_cast<size_t>(Nx)};
+    rocfft_plan_create(&forward_plan, rocfft_placement_notinplace, rocfft_transform_type_real_forward, rocfft_precision_double,
+                       3, lengths, 1, nullptr);
+
+    rocfft_plan_get_work_buffer_size(forward_plan, &work_size);
+    void* work_buffer;
+    hipMalloc(&work_buffer, work_size);
+    rocfft_execution_info forward_info;
+    rocfft_execution_info_create(&forward_info);
+    rocfft_execution_info_set_work_buffer(forward_info, work_buffer, work_size);
+
+    rocfft_plan inverse_plan;
+    rocfft_plan_create(&inverse_plan, rocfft_placement_notinplace, rocfft_transform_type_real_inverse, rocfft_precision_double,
+                       3, lengths, 1, nullptr);
+
+    rocfft_execution_info inverse_info;
+    rocfft_execution_info_create(&inverse_info);
+    rocfft_execution_info_set_work_buffer(inverse_info, work_buffer, work_size);
 
     int blockSize = 256;
     int gridSize = (Nx * Ny * ((Nz/2)+1) + blockSize - 1) / blockSize;
     /*Variable Setup*/
 
     /*Hockney Computation*/
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
+    hipEvent_t start, stop;
+    hipEventCreate(&start);
+    hipEventCreate(&stop);
+    hipEventRecord(start);
 
-    zeroPadKernel<<<gridDim, blockDim>>>(d_extended_input, d_input, nx, ny, nz, Nx, Ny, Nz);
+    hipLaunchKernelGGL(zeroPadKernel, gridDim, blockDim, 0, 0, d_extended_input, d_input, nx, ny, nz, Nx, Ny, Nz);
+
+    rocfft_execute(forward_plan, (void**)&d_extended_input, (void**)&d_out, forward_info);
  
-    cufftExecD2Z(plan, (cufftDoubleReal *)d_extended_input, (cufftDoubleComplex *)d_out);
+    hipLaunchKernelGGL(complexMultiplyKernel, gridSize, blockSize, 0, 0, d_out, d_temp, d_temp, Nx * Ny * ((Nz/2)+1));
     
-    complexMultiplyKernel<<<gridSize, blockSize>>>(d_out, d_temp, d_temp, Nx * Ny * ((Nz/2)+1));
-
-    cufftExecZ2D(plan2, (cufftDoubleComplex *)d_temp, (cufftDoubleReal *)d_out2);
+    rocfft_execute(inverse_plan, (void**)&d_temp, (void**)&d_out2, inverse_info);
     
-    extractKernel<<<gridDimout, blockDim>>>(d_out2, d_output, Nx, Ny, Nz, mx, my, mz);
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
+    hipLaunchKernelGGL(extractKernel, gridDimout, blockDim, 0, 0, d_out2, d_output, Nx, Ny, Nz, mx, my, mz);
+    
+    hipEventRecord(stop);
+    hipEventSynchronize(stop);
     float milliseconds;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-
+    hipEventElapsedTime(&milliseconds, start, stop);
     /*Hockney Computation*/
 
-    cudaMemcpy(output.data(), d_output, mx * my * mz * sizeof(double), cudaMemcpyDeviceToHost);
+    hipMemcpy(output.data(), d_output, mx * my * mz *sizeof(double), hipMemcpyDeviceToHost);
     
-    /*FFTX*/
+     /*FFTX*/
     double *fftx_input, *fftx_sym, *fftx_output;
-    cudaMalloc(&fftx_input, nx*ny*nz*sizeof(double));
-    cudaMalloc(&fftx_sym, 2* Nx * Ny * ((Nz/2)+1)*sizeof(double));
-    cudaMalloc(&fftx_output, mx*my*mz*sizeof(double));
-    cudaMemcpy(fftx_input, input.data(), nx*ny*nz*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(fftx_sym, input2.data(), 2* Nx * Ny * ((Nz/2)+1)*sizeof(double), cudaMemcpyHostToDevice);
+    hipMalloc(&fftx_input, nx*ny*nz*sizeof(double));
+    hipMalloc(&fftx_sym, 2* Nx * Ny * ((Nz/2)+1)*sizeof(double));
+    hipMalloc(&fftx_output, mx*my*mz*sizeof(double));
+    hipMemcpy(fftx_input, input.data(), nx*ny*nz*sizeof(double), hipMemcpyHostToDevice);
+    hipMemcpy(fftx_sym, input2.data(), 2* Nx * Ny * ((Nz/2)+1)*sizeof(double), hipMemcpyHostToDevice);
     
-
-    std::vector<void*>args{&fftx_output, &fftx_input, &fftx_sym};
+    std::vector<void*>args{fftx_output, fftx_input, fftx_sym};
     std::vector<int> sizes{nx, ny, nz};
     HOCKNEYCONVProblem hcp(args, sizes, "hockney");
     hcp.transform();
     float time = hcp.getTime();
-    
-    /*FFTX*/
 
-    cudaMemcpy(spiral_output.data(), fftx_output, mx*my*mz*sizeof(double), cudaMemcpyDeviceToHost);
-    cudaDeviceSynchronize();
+     /*FFTX*/
+
+    hipMemcpy(spiral_output.data(), fftx_output, mx*my*mz*sizeof(double), hipMemcpyDeviceToHost);
+    hipDeviceSynchronize();
 
     checkOutputBuffers(output.data(), spiral_output.data(), mx*my*mz);
 
     std::cout << "The execution time for\nvendor: " << milliseconds << " ms\n" << "FFTX: " << time << " ms" << std::endl; 
+
     // Clean up
-    cudaFree(d_extended_input);
-    cudaFree(d_out);
-    cudaFree(d_temp);
-    cudaFree(d_out2);
-    cufftDestroy(plan);
-    cufftDestroy(plan2);
+    hipFree(d_extended_input);
+    hipFree(d_out);
+    hipFree(d_temp);
+    hipFree(d_out2);
+    rocfft_plan_destroy(forward_plan);
+    rocfft_plan_destroy(inverse_plan);
 
     return 0;
 }

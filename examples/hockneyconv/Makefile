@@ -11,10 +11,10 @@ all: test
 # 	$(CC) -std=c++17 -O3 -w -I$(INCLUDE) hockney_test.cpp -o cpu_hockney -lfftw3
 
 cuda:
-	$(NVCC) -O3 -w -I$(INCLUDE) -DFFTX_CUDA hockney_test_cuda.cu -o cuda_hockney -L$(LIB) -lcuda -lnvrtc -lcufft -lfftx_dftbat_gpu -lfftx_idftbat_gpu -lfftx_mddft_gpu -lfftx_imddft_gpu -lfftx_mdprdft_gpu -lfftx_imdprdft_gpu -lfftx_rconv_gpu -lfftx_prdftbat_gpu -lfftx_iprdftbat_gpu
+	$(NVCC) -O3 -w -I$(INCLUDE) -DFFTX_CUDA hockney_test_cuda_timer.cu -o cuda_hockney -L$(LIB) -lcuda -lnvrtc -lcufft -lfftx_dftbat_gpu -lfftx_idftbat_gpu -lfftx_mddft_gpu -lfftx_imddft_gpu -lfftx_mdprdft_gpu -lfftx_imdprdft_gpu -lfftx_rconv_gpu -lfftx_prdftbat_gpu -lfftx_iprdftbat_gpu
 
 hip:
-	$(HIPCC) -O3 -w -I$(INCLUDE_SRC) -I$(INCLUDE_LIB) -DFFTX_HIP hockney_test_hip.cpp -o hip_hockney -lrocfft
+	$(HIPCC) -O3 -w -I$(INCLUDE) -DFFTX_HIP hockney_test_hip.cpp -o hip_hockney -L$(LIB) -lrocfft -lfftx_dftbat_gpu -lfftx_idftbat_gpu -lfftx_mddft_gpu -lfftx_imddft_gpu -lfftx_mdprdft_gpu -lfftx_imdprdft_gpu -lfftx_rconv_gpu -lfftx_prdftbat_gpu -lfftx_iprdftbat_gpu 
 
 clean:
 	rm *_hockney
